@@ -35,10 +35,17 @@ CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON")
 # ================== GOOGLE SHEETS ==================
 
 try:
-    with open("credentials.json", "r") as f:
-        creds_dict = json.load(f)
+    # 🔹 Intenta cargar desde variable de entorno
+    if os.getenv("GOOGLE_CREDENTIALS_JSON"):
+        creds_dict = json.loads(os.getenv("GOOGLE_CREDENTIALS_JSON"))
+        print("✅ Credenciales cargadas desde variable de entorno.")
+    else:
+        # 🔹 Si no existe, intenta cargar desde archivo local (modo desarrollo)
+        with open("credentials.json", "r") as f:
+            creds_dict = json.load(f)
+        print("✅ Credenciales cargadas desde archivo local.")
 except Exception as e:
-    raise RuntimeError(f"❌ No se pudo cargar credentials.json: {e}")
+    raise RuntimeError(f"❌ No se pudo cargar las credenciales: {e}")
 
 scopes = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -779,4 +786,5 @@ def main():
     app.run_polling()
 
 if __name__ == "__main__":
+
     main()
