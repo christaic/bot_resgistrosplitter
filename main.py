@@ -21,7 +21,7 @@ from telegram.error import BadRequest
 
 
 # ================== CONFIGURACIÓN ==================
-BOT_TOKEN = os.environ.get("8279343407:AAFSlPt_cdKiL3RH0tovHJ_NBBWOWp8x-Po")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 NOMBRE_CARPETA_DRIVE = "REPORTE_SPLITTERS_SGA"
 SHARED_DRIVE_ID = "0AGwYd9KBTiYXUk9PVA"
 
@@ -788,3 +788,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+
