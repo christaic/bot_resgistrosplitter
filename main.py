@@ -377,7 +377,7 @@ async def tipo_caja_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         ]
     ]
 
-    texto_confirmacion = f"📦 Has seleccionado: *{tipo}*"
+    texto_confirmacion = f"🟠 Has seleccionado: *{tipo}*"
     await query.edit_message_text(
         texto_confirmacion,
         parse_mode="Markdown",
@@ -388,14 +388,14 @@ async def tipo_caja_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return "CONFIRMAR"
 
 
+# ================== CONFIRMAR CALLBACK ==================
 async def confirmar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     paso = query.data.replace("CONFIRMAR_", "")
-    valor = context.user_data["registro"].get(paso, "")
+    registro = context.user_data["registro"]
+    valor = registro.get(paso, "")
 
-    # Tomamos etiqueta "bonita"
     etiqueta = ETIQUETAS.get(paso, paso)
-
     await query.answer("⏳ Procesando...")
 
     # ==========================================
@@ -403,7 +403,6 @@ async def confirmar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # ==========================================
 
     if paso.startswith("FOTO_"):
-        # ✅ Confirmación sin mostrar link
         try:
             await query.edit_message_text(f"✅ {etiqueta} confirmado correctamente.")
         except BadRequest as e:
@@ -411,12 +410,8 @@ async def confirmar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 raise
 
     elif paso.startswith("UBICACION_"):
-        lat = context.user_data["registro"].get(
-            "LAT_CLIENTE" if paso == "UBICACION_CLIENTE" else "LAT_CTO"
-        )
-        lng = context.user_data["registro"].get(
-            "LNG_CLIENTE" if paso == "UBICACION_CLIENTE" else "LNG_CTO"
-        )
+        lat = registro.get("LAT_CLIENTE" if paso == "UBICACION_CLIENTE" else "LAT_CTO")
+        lng = registro.get("LNG_CLIENTE" if paso == "UBICACION_CLIENTE" else "LNG_CTO")
         try:
             await query.edit_message_text(f"✅ {etiqueta} confirmado: ({lat}, {lng})")
         except BadRequest as e:
@@ -424,8 +419,7 @@ async def confirmar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 raise
 
     elif paso == "TIPO_CAJA":
-        # ✅ Confirmación especial del tipo de caja
-        tipo = context.user_data["registro"].get("TIPO_CAJA", "")
+        tipo = registro.get("TIPO_CAJA", "")
         try:
             await query.edit_message_text(f"✅ Tipo de caja confirmado: *{tipo}*", parse_mode="Markdown")
         except BadRequest as e:
@@ -433,22 +427,37 @@ async def confirmar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 raise
 
     else:
-        # ✅ Confirmación estándar (texto)
         try:
             await query.edit_message_text(f"✅ {etiqueta} confirmado: {valor}")
         except BadRequest as e:
             if "Message is not modified" not in str(e):
                 raise
 
-    # ==========================================
-    # 🔹 AVANZAR AL SIGUIENTE PASO
-    # ==========================================
+    # ======================================================
+    # 🔹 SI LA CONFIRMACIÓN VIENE DESDE EL RESUMEN FINAL
+    # ======================================================
+    if registro.get("DESDE_RESUMEN", False):
+        registro["CORRIGIENDO_ULTIMO"] = paso  # 👈 Campo corregido para resaltarlo
+        registro.pop("DESDE_RESUMEN", None)
+        registro.pop("CORRIGIENDO", None)
+        registro["PASO_ACTUAL"] = "RESUMEN_FINAL"
+
+        # ✏️ Mensaje informativo opcional
+        await context.bot.send_message(
+            chat_id=query.message.chat.id,
+            text="✏️ Campo actualizado correctamente, mostrando resumen actualizado..."
+        )
+
+        return await mostrar_resumen_final(update, context)
+
+    # ======================================================
+    # 🔹 FLUJO NORMAL (NO DESDE RESUMEN)
+    # ======================================================
     idx = PASOS_LISTA.index(paso)
     if idx + 1 < len(PASOS_LISTA):
         siguiente = PASOS_LISTA[idx + 1]
-        context.user_data["registro"]["PASO_ACTUAL"] = siguiente  # guarda progreso
+        registro["PASO_ACTUAL"] = siguiente
 
-        # 🔸 Si el siguiente paso es un botón
         if PASOS[siguiente]["tipo"] == "boton":
             if siguiente == "TIPO_CAJA":
                 keyboard = [
@@ -465,9 +474,7 @@ async def confirmar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 return "TIPO_CAJA"
 
             elif siguiente == "USO_SPLITTER":
-                keyboard = [
-                    [InlineKeyboardButton("✅ Confirmar", callback_data="SPLITTER_SI")]
-                ]
+                keyboard = [[InlineKeyboardButton("✅ Confirmar", callback_data="SPLITTER_SI")]]
                 await context.bot.send_message(
                     query.message.chat.id,
                     PASOS[siguiente]["mensaje"],
@@ -475,12 +482,12 @@ async def confirmar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 )
                 return "USO_SPLITTER"
 
-        # 🔸 Si el siguiente paso es texto, ubicación o foto
+        # Si el siguiente paso es texto, ubicación o foto
         else:
             await context.bot.send_message(query.message.chat.id, PASOS[siguiente]["mensaje"])
             return siguiente
 
-    # 🔸 Si ya no hay más pasos → mostrar resumen final
+    # Si no hay más pasos → mostrar resumen final
     else:
         return await mostrar_resumen_final(update, context)
 
@@ -506,7 +513,7 @@ async def corregir_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
         ]
         await query.edit_message_text(
-            "📦 Seleccione nuevamente el tipo de caja:",
+            "🟠 Seleccione nuevamente el tipo de caja:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return "TIPO_CAJA"
@@ -623,8 +630,9 @@ async def guardar_registro(update, context):
 async def mostrar_resumen_final(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Muestra el resumen final del registro con opciones Guardar/Corregir/Cancelar"""
     registro = context.user_data.get("registro", {})
+    paso_corregido = registro.get("CORRIGIENDO_ULTIMO", None)  # 👈 Campo corregido recientemente
 
-    # Texto del resumen
+    # Texto base del resumen
     resumen = (
         f"📋 *Resumen del registro*\n\n"
         f"🎫 Ticket: {registro.get('TICKET','')}\n"
@@ -639,14 +647,20 @@ async def mostrar_resumen_final(update: Update, context: ContextTypes.DEFAULT_TY
         f"{'✅' if registro.get('FOTO_SPLITTER') else '❌'} Splitter"
     )
 
-    # Botones
+    # ✏️ Si viene de corrección, añadir aviso visual arriba del resumen
+    if paso_corregido:
+        etiqueta = ETIQUETAS.get(paso_corregido, paso_corregido)
+        resumen = f"✏️ *{etiqueta} actualizado correctamente.*\n\n" + resumen
+        registro.pop("CORRIGIENDO_ULTIMO", None)
+
+    # Botones de acción
     keyboard = [
         [InlineKeyboardButton("✅ Guardar Registro", callback_data="FINAL_GUARDAR")],
         [InlineKeyboardButton("✏️ Corregir", callback_data="FINAL_CORREGIR")],
         [InlineKeyboardButton("❌ Cancelar", callback_data="FINAL_CANCELAR")]
     ]
 
-    # 🧹 Usar edit_message_text para reemplazar el mensaje anterior
+    # Mostrar resumen reemplazando el mensaje anterior
     if update.callback_query:
         query = update.callback_query
         await query.edit_message_text(
@@ -662,6 +676,7 @@ async def mostrar_resumen_final(update: Update, context: ContextTypes.DEFAULT_TY
         )
 
     return "RESUMEN_FINAL"
+
 
 # ================== CALLBACK FINAL ==================
 async def resumen_final_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -713,19 +728,36 @@ async def corregir_campo_callback(update: Update, context: ContextTypes.DEFAULT_
 
     # Guardamos el campo que se está corrigiendo
     context.user_data["registro"]["CORRIGIENDO"] = paso
-    context.user_data["registro"]["DESDE_RESUMEN"] = True
+    context.user_data["registro"]["DESDE_RESUMEN"] = True  # 👈 Marca que la corrección viene desde el resumen final
 
-    # Mostramos el mensaje original del paso (más amigable para el técnico)
+    # 🔹 Caso especial: Tipo de caja (CTO o NAP)
+    if paso == "TIPO_CAJA":
+        keyboard = [
+            [
+                InlineKeyboardButton("🟦 CTO", callback_data="TIPO_CTO"),
+                InlineKeyboardButton("🟩 NAP", callback_data="TIPO_NAP"),
+            ]
+        ]
+        await query.edit_message_text(
+            "📦 Seleccione nuevamente el tipo de caja:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return "TIPO_CAJA"
+
+    # 🔹 Para los demás pasos → mostrar su mensaje habitual
     if paso in PASOS:
         mensaje = PASOS[paso]["mensaje"]
     else:
         mensaje = f"✏️ Ingresa el valor para {ETIQUETAS.get(paso, paso)}:"
 
-    # 🔹 Usamos edit_message_text para limpiar la botonera del resumen
-    await query.edit_message_text(mensaje)
+    # 🔹 Actualizar el mensaje del resumen final → pedir el nuevo valor
+    try:
+        await query.edit_message_text(mensaje)
+    except BadRequest as e:
+        if "Message is not modified" not in str(e):
+            raise
 
-    # 👉 OJO: aquí no retornamos "RESUMEN_FINAL",
-    # sino el nombre del paso, para que el handler de ese tipo lo capture
+    # 👉 Retorna el paso para que el manejador correcto capture la respuesta
     return paso
 
 
