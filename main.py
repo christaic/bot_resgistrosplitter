@@ -62,7 +62,7 @@ worksheet = sh.sheet1
 ENCABEZADOS = [
     "FECHA", "HORA", "USER_ID", "ID_REGISTRO",
     "TICKET", "DNI", "NOMBRE",
-    "LAT_CLIENTE", "LNG_CLIENTE",
+    "LAT_CLIENTE", "LNG_CLIENTE","TIPO_CTO",
     "CODIGO_CTO", "LAT_CTO", "LNG_CTO",
     "FOTO_CTO", "SPLITTER", "PUERTO", "FOTO_SPLITTER"
 ]
@@ -97,13 +97,17 @@ PASOS = {
         "lat_key": "LAT_CLIENTE",
         "lng_key": "LNG_CLIENTE"
     },
+    "TIPO_CAJA": {
+        "tipo": "boton",
+        "mensaje": "🟠 Seleccione el tipo de caja que está registrando:",
+    },
     "CODIGO_CTO": {
         "tipo": "texto",
-        "mensaje": "🏷 Ingrese el código de la CTO:"
+        "mensaje": "🏷 Ingrese el código de la CTO/NAP:"
     },
     "UBICACION_CTO": {
         "tipo": "ubicacion",
-        "mensaje": "📍 Envíe la ubicación de la CTO:",
+        "mensaje": "📍 Envíe la ubicación de la CTO/NAP:",
         "lat_key": "LAT_CTO",
         "lng_key": "LNG_CTO"
     },
@@ -133,9 +137,10 @@ ETIQUETAS = {
     "DNI": "🪪 DNI",
     "NOMBRE": "👤 Nombre del Cliente",
     "UBICACION_CLIENTE": "📍 Ubicación Cliente",
-    "CODIGO_CTO": "🏷 Código CTO",
-    "UBICACION_CTO": "📍 Ubicación CTO",
-    "FOTO_CTO": "📸 Foto CTO",
+    "TIPO_CAJA": "🟠 Tipo de Caja",   # 👈 NUEVA ETIQUETA AÑADIDA
+    "CODIGO_CTO": "🏷 Código CTO/NAP",
+    "UBICACION_CTO": "📍 Ubicación CTO/NAP",
+    "FOTO_CTO": "📸 Foto CTO/NAP",
     "SPLITTER": "🔌 Uso de Splitter",
     "PUERTO": "🔢 Puerto",
     "FOTO_SPLITTER": "📸 Foto Splitter"
@@ -286,6 +291,7 @@ async def registro_activo_callback(update: Update, context: ContextTypes.DEFAULT
         await query.edit_message_text("❌ Registro anterior cancelado. Inicia uno nuevo con /start")
         return ConversationHandler.END
 
+
 # ================== HANDLER GENÉRICO ==================
 async def manejar_paso(update: Update, context: ContextTypes.DEFAULT_TYPE, paso: str):
     chat_id = update.effective_chat.id
@@ -353,6 +359,35 @@ async def manejar_paso(update: Update, context: ContextTypes.DEFAULT_TYPE, paso:
     return "CONFIRMAR"
 
 # ================== CALLBACKS ==================
+
+async def tipo_caja_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Guarda el tipo de caja (CTO o NAP) seleccionado por el técnico"""
+    query = update.callback_query
+    await query.answer()
+
+    tipo = "CTO" if query.data == "TIPO_CTO" else "NAP"
+    registro = context.user_data["registro"]
+    registro["TIPO_CAJA"] = tipo
+
+    # ✅ Borramos mensaje anterior y mostramos confirmación con botones
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Confirmar", callback_data=f"CONFIRMAR_TIPO_CAJA"),
+            InlineKeyboardButton("✏️ Corregir", callback_data=f"CORREGIR_TIPO_CAJA"),
+        ]
+    ]
+
+    texto_confirmacion = f"📦 Has seleccionado: *{tipo}*"
+    await query.edit_message_text(
+        texto_confirmacion,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+    registro["PASO_ACTUAL"] = "TIPO_CAJA"
+    return "CONFIRMAR"
+
+
 async def confirmar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     paso = query.data.replace("CONFIRMAR_", "")
@@ -363,8 +398,12 @@ async def confirmar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await query.answer("⏳ Procesando...")
 
+    # ==========================================
+    # 🔹 MOSTRAR CONFIRMACIÓN SEGÚN TIPO DE PASO
+    # ==========================================
+
     if paso.startswith("FOTO_"):
-        # ✅ Solo texto, sin link ni imagen
+        # ✅ Confirmación sin mostrar link
         try:
             await query.edit_message_text(f"✅ {etiqueta} confirmado correctamente.")
         except BadRequest as e:
@@ -378,41 +417,70 @@ async def confirmar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         lng = context.user_data["registro"].get(
             "LNG_CLIENTE" if paso == "UBICACION_CLIENTE" else "LNG_CTO"
         )
-        coords = f"({lat}, {lng})" if lat and lng else "No disponible"
-
         try:
             await query.edit_message_text(f"✅ {etiqueta} confirmado: ({lat}, {lng})")
         except BadRequest as e:
             if "Message is not modified" not in str(e):
                 raise
 
+    elif paso == "TIPO_CAJA":
+        # ✅ Confirmación especial del tipo de caja
+        tipo = context.user_data["registro"].get("TIPO_CAJA", "")
+        try:
+            await query.edit_message_text(f"✅ Tipo de caja confirmado: *{tipo}*", parse_mode="Markdown")
+        except BadRequest as e:
+            if "Message is not modified" not in str(e):
+                raise
+
     else:
-        # Texto normal (Ticket, DNI, Puerto, etc.)
+        # ✅ Confirmación estándar (texto)
         try:
             await query.edit_message_text(f"✅ {etiqueta} confirmado: {valor}")
         except BadRequest as e:
             if "Message is not modified" not in str(e):
                 raise
 
-    # 🔹 Avanzar al siguiente paso
+    # ==========================================
+    # 🔹 AVANZAR AL SIGUIENTE PASO
+    # ==========================================
     idx = PASOS_LISTA.index(paso)
     if idx + 1 < len(PASOS_LISTA):
         siguiente = PASOS_LISTA[idx + 1]
-        context.user_data["registro"]["PASO_ACTUAL"] = siguiente  # 👈 aquí guardamos el paso actual
-        
+        context.user_data["registro"]["PASO_ACTUAL"] = siguiente  # guarda progreso
+
+        # 🔸 Si el siguiente paso es un botón
         if PASOS[siguiente]["tipo"] == "boton":
-            keyboard = [
-                [InlineKeyboardButton("✅ Confirmar", callback_data="SPLITTER_SI"),
-            ]]
-            await context.bot.send_message(
-                query.message.chat.id,
-                PASOS[siguiente]["mensaje"],
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            return "USO_SPLITTER"
+            if siguiente == "TIPO_CAJA":
+                keyboard = [
+                    [
+                        InlineKeyboardButton("🟦 CTO", callback_data="TIPO_CTO"),
+                        InlineKeyboardButton("🟩 NAP", callback_data="TIPO_NAP"),
+                    ]
+                ]
+                await context.bot.send_message(
+                    query.message.chat.id,
+                    PASOS[siguiente]["mensaje"],
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                return "TIPO_CAJA"
+
+            elif siguiente == "USO_SPLITTER":
+                keyboard = [
+                    [InlineKeyboardButton("✅ Confirmar", callback_data="SPLITTER_SI")]
+                ]
+                await context.bot.send_message(
+                    query.message.chat.id,
+                    PASOS[siguiente]["mensaje"],
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                return "USO_SPLITTER"
+
+        # 🔸 Si el siguiente paso es texto, ubicación o foto
         else:
             await context.bot.send_message(query.message.chat.id, PASOS[siguiente]["mensaje"])
             return siguiente
+
+    # 🔸 Si ya no hay más pasos → mostrar resumen final
     else:
         return await mostrar_resumen_final(update, context)
 
@@ -424,17 +492,31 @@ async def corregir_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
     paso = query.data.replace("CORREGIR_", "")
-
     await query.answer("✏️ Corrigiendo...")
 
     # Guardamos el paso que quiere corregir
     context.user_data["registro"]["CORRIGIENDO"] = paso
 
-    # En lugar de "Reingresa ...", mostramos directamente el mensaje original del paso
+    # 🔹 Si es el tipo de caja → mostrar nuevamente botonera CTO/NAP
+    if paso == "TIPO_CAJA":
+        keyboard = [
+            [
+                InlineKeyboardButton("🟦 CTO", callback_data="TIPO_CTO"),
+                InlineKeyboardButton("🟩 NAP", callback_data="TIPO_NAP"),
+            ]
+        ]
+        await query.edit_message_text(
+            "📦 Seleccione nuevamente el tipo de caja:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return "TIPO_CAJA"
+
+    # 🔹 Para los demás pasos → mensaje estándar
     mensaje = PASOS[paso]["mensaje"] if paso in PASOS else f"✏️ Ingresa el valor para {paso}:"
     await query.edit_message_text(mensaje)
 
     return paso
+
 
 async def uso_splitter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -472,6 +554,7 @@ async def guardar_registro(update, context):
         data.get("FECHA", ""), data.get("HORA", ""), data.get("USER_ID", ""), data.get("ID_REGISTRO", ""),
         data.get("TICKET", ""), data.get("DNI", ""), data.get("NOMBRE", ""),
         data.get("LAT_CLIENTE", ""), data.get("LNG_CLIENTE", ""),
+        data.get("TIPO_CAJA", ""),  # 👈 Nuevo valor
         data.get("CODIGO_CTO", ""), data.get("LAT_CTO", ""), data.get("LNG_CTO", ""),
         data.get("FOTO_CTO", ""),  # Link Drive
         data.get("SPLITTER", "NO"),
@@ -548,6 +631,7 @@ async def mostrar_resumen_final(update: Update, context: ContextTypes.DEFAULT_TY
         f"🪪 DNI: {registro.get('DNI','')}\n"
         f"👤 Cliente: {registro.get('NOMBRE','')}\n"
         f"📍 Cliente: ({registro.get('LAT_CLIENTE','')}, {registro.get('LNG_CLIENTE','')})\n"
+        f"🟠 Tipo de caja: {registro.get('TIPO_CAJA','-')}\n"
         f"🏷 CTO: {registro.get('CODIGO_CTO','')}\n"
         f"📍 CTO: ({registro.get('LAT_CTO','')}, {registro.get('LNG_CTO','')})\n"
         f"🔌 Splitter: {registro.get('SPLITTER','NO')} | Puerto: {registro.get('PUERTO','-')}\n"
@@ -586,26 +670,24 @@ async def resumen_final_callback(update: Update, context: ContextTypes.DEFAULT_T
 
     if accion == "FINAL_GUARDAR":
         await query.answer("⏳ Guardando registro...")
-
-        # 🧹 Limpiar botonera del mensaje de resumen
         await query.edit_message_text("✅ Registro guardado, generando resumen final...")
-
         return await guardar_registro(update, context)
 
     elif accion == "FINAL_CORREGIR":
         await query.answer("✏️ Selecciona qué campo corregir")
 
-        # Botonera de todos los campos editables
+        # Botonera con todos los campos corregibles, incluyendo tipo de caja
         keyboard = [
             [InlineKeyboardButton("🎫 Ticket", callback_data="CORREGIR_TICKET"),
              InlineKeyboardButton("🪪 DNI", callback_data="CORREGIR_DNI")],
             [InlineKeyboardButton("👤 Nombre", callback_data="CORREGIR_NOMBRE"),
              InlineKeyboardButton("📍 Cliente", callback_data="CORREGIR_UBICACION_CLIENTE")],
-            [InlineKeyboardButton("🏷 CTO", callback_data="CORREGIR_CODIGO_CTO"),
-             InlineKeyboardButton("📍 Ubicación CTO", callback_data="CORREGIR_UBICACION_CTO")],
-            [InlineKeyboardButton("📸 Foto CTO", callback_data="CORREGIR_FOTO_CTO"),
-             InlineKeyboardButton("🔌 Puerto", callback_data="CORREGIR_PUERTO")],
-            [InlineKeyboardButton("📸 Foto Splitter", callback_data="CORREGIR_FOTO_SPLITTER")]
+            [InlineKeyboardButton("🟠 Tipo de caja", callback_data="CORREGIR_TIPO_CAJA"),
+             InlineKeyboardButton("🏷 CTO/NAP", callback_data="CORREGIR_CODIGO_CTO")],
+            [InlineKeyboardButton("📍 Ubicación CTO", callback_data="CORREGIR_UBICACION_CTO"),
+             InlineKeyboardButton("📸 Foto CTO", callback_data="CORREGIR_FOTO_CTO")],
+            [InlineKeyboardButton("🔌 Puerto", callback_data="CORREGIR_PUERTO"),
+             InlineKeyboardButton("📸 Foto Splitter", callback_data="CORREGIR_FOTO_SPLITTER")],
         ]
 
         await query.edit_message_text(
@@ -616,11 +698,9 @@ async def resumen_final_callback(update: Update, context: ContextTypes.DEFAULT_T
 
     elif accion == "FINAL_CANCELAR":
         await query.answer("❌ Registro cancelado")
-
-        # 🧹 Limpiar botonera y mostrar mensaje simple
         await query.edit_message_text("❌ Registro cancelado por el usuario.")
-
         return ConversationHandler.END
+
 
 
 # ================== CALLBACK DE CORRECCIÓN DE CAMPO ==================
@@ -666,8 +746,9 @@ async def mostrar_resumen_registro(update: Update, context: ContextTypes.DEFAULT
         f"🎫 Ticket: {data.get('TICKET','')}\n"
         f"🪪 DNI: {data.get('DNI','')}\n"
         f"📍 Cliente: {data.get('LAT_CLIENTE','')}, {data.get('LNG_CLIENTE','')}\n"
-        f"🏷 CTO: {data.get('CODIGO_CTO','')}\n"
-        f"📍 CTO: {data.get('LAT_CTO','')}, {data.get('LNG_CTO','')}\n"
+        f"🟠 Tipo de Caja: {data.get('TIPO_CAJA','-')}\n"  # 👈 NUEVA LÍNEA AÑADIDA
+        f"🏷 CTO/NAP: {data.get('CODIGO_CTO','')}\n"
+        f"📍 CTO/NAP: {data.get('LAT_CTO','')}, {data.get('LNG_CTO','')}\n"
         f"🔌 Splitter: {data.get('SPLITTER','NO')} | Puerto: {data.get('PUERTO','-')}\n"
         f"📸 Fotos registradas correctamente."
     )
@@ -700,59 +781,90 @@ def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start), CommandHandler("registro", registro)],
+        entry_points=[
+            CommandHandler("start", start),
+            CommandHandler("registro", registro)
+        ],
         states={
+
+            # ====== PASO 1: TICKET ======
             "TICKET": [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: manejar_paso(u, c, "TICKET")),
                 CommandHandler("start", start),
                 CommandHandler("registro", registro),
             ],
+
+            # ====== PASO 2: DNI ======
             "DNI": [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: manejar_paso(u, c, "DNI")),
                 CommandHandler("start", start),
                 CommandHandler("registro", registro),
             ],
+
+            # ====== PASO 3: NOMBRE ======
             "NOMBRE": [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: manejar_paso(u, c, "NOMBRE")),
                 CommandHandler("start", start),
                 CommandHandler("registro", registro),
             ],
+
+            # ====== PASO 4: UBICACIÓN CLIENTE ======
             "UBICACION_CLIENTE": [
                 MessageHandler(filters.LOCATION, lambda u, c: manejar_paso(u, c, "UBICACION_CLIENTE")),
                 CommandHandler("start", start),
                 CommandHandler("registro", registro),
             ],
+
+            # ====== PASO 5: TIPO DE CAJA (CTO/NAP) ======
+            "TIPO_CAJA": [
+                CallbackQueryHandler(tipo_caja_callback, pattern="^(TIPO_CTO|TIPO_NAP)$"),
+                CommandHandler("start", start),
+                CommandHandler("registro", registro),
+            ],
+
+            # ====== PASO 6: CÓDIGO CTO/NAP ======
             "CODIGO_CTO": [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: manejar_paso(u, c, "CODIGO_CTO")),
                 CommandHandler("start", start),
                 CommandHandler("registro", registro),
             ],
+
+            # ====== PASO 7: UBICACIÓN CTO ======
             "UBICACION_CTO": [
                 MessageHandler(filters.LOCATION, lambda u, c: manejar_paso(u, c, "UBICACION_CTO")),
                 CommandHandler("start", start),
                 CommandHandler("registro", registro),
             ],
+
+            # ====== PASO 8: FOTO CTO ======
             "FOTO_CTO": [
                 MessageHandler(filters.PHOTO, lambda u, c: manejar_paso(u, c, "FOTO_CTO")),
                 CommandHandler("start", start),
                 CommandHandler("registro", registro),
             ],
+
+            # ====== PASO 9: USO DE SPLITTER ======
             "USO_SPLITTER": [
                 CallbackQueryHandler(uso_splitter_callback, pattern="^(SPLITTER_SI)$"),
                 CommandHandler("start", start),
                 CommandHandler("registro", registro),
             ],
+
+            # ====== PASO 10: PUERTO ======
             "PUERTO": [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: manejar_paso(u, c, "PUERTO")),
                 CommandHandler("start", start),
                 CommandHandler("registro", registro),
             ],
+
+            # ====== PASO 11: FOTO SPLITTER ======
             "FOTO_SPLITTER": [
                 MessageHandler(filters.PHOTO, lambda u, c: manejar_paso(u, c, "FOTO_SPLITTER")),
                 CommandHandler("start", start),
                 CommandHandler("registro", registro),
             ],
 
+            # ====== PASO DE CONFIRMACIÓN GENERAL ======
             "CONFIRMAR": [
                 CallbackQueryHandler(confirmar_callback, pattern="^CONFIRMAR_.*$"),
                 CallbackQueryHandler(corregir_callback, pattern="^CORREGIR_.*$"),
@@ -760,24 +872,21 @@ def main():
                 CommandHandler("registro", registro),
             ],
 
-            "WAITING": [
-                CallbackQueryHandler(registro_activo_callback, pattern="^(CONTINUAR_REGISTRO|CANCELAR_REGISTRO)$"),
-                CommandHandler("start", start),
-                CommandHandler("registro", registro),
-            ],
-
+            # ====== RESUMEN FINAL ======
             "RESUMEN_FINAL": [
                 CallbackQueryHandler(resumen_final_callback, pattern="^FINAL_.*$"),
                 CommandHandler("start", start),
                 CommandHandler("registro", registro),
             ],
 
+            # ====== CORRECCIÓN DESDE RESUMEN ======
             "CORREGIR_CAMPO": [
                 CallbackQueryHandler(corregir_campo_callback, pattern="^CORREGIR_.*$"),
                 CommandHandler("start", start),
                 CommandHandler("registro", registro),
             ],
         },
+
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
@@ -785,8 +894,6 @@ def main():
     logger.info("🤖 Bot iniciado y escuchando...")
     app.run_polling()
 
+
 if __name__ == "__main__":
-
     main()
-
-
