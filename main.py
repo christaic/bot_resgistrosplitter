@@ -578,6 +578,8 @@ async def guardar_registro(update, context):
     # Coordenadas cliente
     if data.get("LAT_CLIENTE") and data.get("LNG_CLIENTE"):
         resumen_final += f"{ETIQUETAS['UBICACION_CLIENTE']}: ({data['LAT_CLIENTE']}, {data['LNG_CLIENTE']})\n"
+     # 👇 Aquí agregamos el tipo de caja (CTO o NAP)
+    resumen_final += f"{ETIQUETAS['TIPO_CAJA']}: {data.get('TIPO_CAJA','-')}\n"
     # CTO
     resumen_final += f"{ETIQUETAS['CODIGO_CTO']}: {data.get('CODIGO_CTO','')}\n"
     if data.get("LAT_CTO") and data.get("LNG_CTO"):
@@ -587,7 +589,7 @@ async def guardar_registro(update, context):
     # Fotos
     fotos_txt = []
     if data.get("FOTO_CTO"):
-        fotos_txt.append("CTO")
+        fotos_txt.append("CTO/NAP")
     if data.get("FOTO_SPLITTER"):
         fotos_txt.append("Splitter")
     if fotos_txt:
@@ -615,7 +617,7 @@ async def guardar_registro(update, context):
             await context.bot.send_message(chat_id=grupo_id, text=resumen_final, parse_mode="Markdown")
 
             if data.get("FOTO_CTO"):
-                await context.bot.send_photo(chat_id=grupo_id, photo=data["FOTO_CTO"], caption="📸 CTO")
+                await context.bot.send_photo(chat_id=grupo_id, photo=data["FOTO_CTO"], caption="📸 CTO/NAP")
             if data.get("FOTO_SPLITTER"):
                 await context.bot.send_photo(chat_id=grupo_id, photo=data["FOTO_SPLITTER"], caption="📸 Splitter")
 
@@ -643,7 +645,7 @@ async def mostrar_resumen_final(update: Update, context: ContextTypes.DEFAULT_TY
         f"🏷 CTO: {registro.get('CODIGO_CTO','')}\n"
         f"📍 CTO: ({registro.get('LAT_CTO','')}, {registro.get('LNG_CTO','')})\n"
         f"🔌 Splitter: {registro.get('SPLITTER','NO')} | Puerto: {registro.get('PUERTO','-')}\n"
-        f"📸 Fotos: {'✅' if registro.get('FOTO_CTO') else '❌'} CTO / "
+        f"📸 Fotos: {'✅' if registro.get('FOTO_CTO') else '❌'} CTO/NAP"
         f"{'✅' if registro.get('FOTO_SPLITTER') else '❌'} Splitter"
     )
 
@@ -929,3 +931,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
