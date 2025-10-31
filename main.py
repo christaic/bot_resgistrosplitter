@@ -442,12 +442,6 @@ async def confirmar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         registro.pop("CORRIGIENDO", None)
         registro["PASO_ACTUAL"] = "RESUMEN_FINAL"
 
-        # ✏️ Mensaje informativo opcional
-        await context.bot.send_message(
-            chat_id=query.message.chat.id,
-            text="✏️ Campo actualizado correctamente, mostrando resumen actualizado..."
-        )
-
         return await mostrar_resumen_final(update, context)
 
     # ======================================================
@@ -741,7 +735,7 @@ async def corregir_campo_callback(update: Update, context: ContextTypes.DEFAULT_
             ]
         ]
         await query.edit_message_text(
-            "📦 Seleccione nuevamente el tipo de caja:",
+            "🟠 Seleccione nuevamente el tipo de caja:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return "TIPO_CAJA"
@@ -931,4 +925,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
