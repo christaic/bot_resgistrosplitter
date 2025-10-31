@@ -125,7 +125,7 @@ PASOS = {
     },
     "FOTO_SPLITTER": {
         "tipo": "foto",
-        "mensaje": "📸 Envíe la foto de CTO con splitter donde se vea el puerto:"
+        "mensaje": "📸 Envíe la foto de CTO/NAP con splitter donde se vea el puerto:"
     },
 }
 
@@ -925,5 +925,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
